@@ -854,7 +854,8 @@ qx.Class.define("zx.io.persistence.ClassIo", {
 
     /**
      * Replays a set of recorded changes on a known object, used for when a change set
-     * is received over the network
+     * is received over the network.  On the server, changes to properties which are not
+     * client editable (`zx.io.remote.anno.Property#clientEditable`) are discarded.
      *
      * @param endpoint {Endpoint} the endpoint that is providing the changes (used to suppress recursive notifications)
      * @param store {Map} map of changes
@@ -915,11 +916,20 @@ qx.Class.define("zx.io.persistence.ClassIo", {
      * @param {String} propertyName name of the property
      * @param {String} changeType type of change, currently `arrayChange`, `arrayReplace`, or `setValue`
      * @param {*} value
-     * @returns
+     * @returns {Promise?} `null` if the change was discarded because the client may not edit the property
      */
     __setPropertyValueFromRemote(endpoint, obj, propertyName, changeType, value) {
       let propertyDef = this.__properties[propertyName];
       let propertyPath = this.__clazz.classname + "." + propertyName;
+
+      if (qx.core.Environment.get("zx.io.remote.NetworkEndpoint.server")) {
+        // Duck typing, because zx.io.remote.anno.Property is not known to zx.io.persistence
+        let notEditable = (propertyDef?.["@"] || []).some(anno => typeof anno.isClientEditable == "function" && !anno.isClientEditable());
+        if (notEditable) {
+          this.warn(`Ignoring ${changeType} from the client for ${propertyPath}, the property is not client editable`);
+          return null;
+        }
+      }
 
       const doIt = () => {
         if (changeType == "arrayChange") {
